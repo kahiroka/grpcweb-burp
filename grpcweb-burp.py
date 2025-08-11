@@ -2,7 +2,7 @@ from burp import IBurpExtender, IHttpListener, IContextMenuFactory
 from java.awt.event import ActionListener
 from javax.swing import JMenuItem
 import json
-from protobufs import ProtoBufs
+from protobufs import ProtoBufs, ProtoBufError
 import binascii
 import struct
 
@@ -18,8 +18,27 @@ class RequestModifier:
         # Add header to encode later
         headers.append("X-GRPCWEB-FLAG: True")
 
-        decoded = ProtoBufs.decode(body_bytes[5:].tostring())
-        modified_bytes = self.helpers.stringToBytes(str(json.dumps(decoded)))
+        try:
+            # Extract and validate gRPC-Web payload
+            if len(body_bytes) < 5:
+                raise ValueError("gRPC-Web message too short")
+            
+            # Skip gRPC-Web framing (first 5 bytes: flags + length)
+            grpc_payload = body_bytes[5:]
+            if isinstance(grpc_payload, (bytes, bytearray)):
+                payload_data = grpc_payload
+            else:
+                payload_data = grpc_payload.tostring()
+            
+            decoded = ProtoBufs.decode(payload_data)
+            modified_bytes = self.helpers.stringToBytes(str(json.dumps(decoded)))
+        except ProtoBufError as e:
+            print("Protobuf decode error: " + str(e))
+            # Return original request if decoding fails
+            return request_bytes
+        except Exception as e:
+            print("Unexpected error during gRPC-Web decode: " + str(e))
+            return request_bytes
 
         # Reconstruct request
         modified_request = self.helpers.buildHttpMessage(headers, modified_bytes)
@@ -37,9 +56,20 @@ class RequestModifier:
         else:
             headers.remove("X-GRPCWEB-FLAG: True")
         
-        encoded = ProtoBufs.encode(json.loads(body))
-        modified_bytes = struct.pack("B", 0x00) + struct.pack(">I", len(encoded)) + encoded
-        #print(binascii.hexlify(modified_bytes))
+        try:
+            # Parse JSON and encode to protobuf
+            json_data = json.loads(body)
+            encoded = ProtoBufs.encode(json_data)
+            
+            # Add gRPC-Web framing: flags (1 byte) + length (4 bytes) + data
+            modified_bytes = struct.pack("B", 0x00) + struct.pack(">I", len(encoded)) + encoded
+        except (json.JSONDecodeError, ProtoBufError) as e:
+            print("Encoding error: " + str(e))
+            # Return original request if encoding fails
+            return request_bytes
+        except Exception as e:
+            print("Unexpected error during gRPC-Web encode: " + str(e))
+            return request_bytes
 
         # Reconstruct request
         modified_request = self.helpers.buildHttpMessage(headers, modified_bytes)
