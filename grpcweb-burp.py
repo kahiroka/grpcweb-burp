@@ -45,12 +45,14 @@ class RequestModifier:
         modified_request = self.helpers.buildHttpMessage(headers, modified_bytes)
         return modified_request
 
-class CustomIntruderMenuHandler(ActionListener):
-    def __init__(self, callbacks, request_modifier, invocation):
+class GenericToolMenuHandler(ActionListener):
+    def __init__(self, callbacks, request_modifier, invocation, tool_name, sender_function):
         self.callbacks = callbacks
         self.helpers = callbacks.getHelpers()
         self.request_modifier = request_modifier
         self.invocation = invocation
+        self.tool_name = tool_name
+        self.sender_function = sender_function
     
     def actionPerformed(self, event):
         try:
@@ -65,50 +67,41 @@ class CustomIntruderMenuHandler(ActionListener):
             # Decode the request
             modified_request = self.request_modifier.grpcweb_decode(original_request)
             
-            # Send the modified request to Intruder
-            self.callbacks.sendToIntruder(
+            # Send the modified request to the specified tool
+            self.sender_function(request_response, modified_request)
+            print("Sent to " + self.tool_name)
+            
+        except Exception as e:
+            print("Error at Send to " + self.tool_name + ": " + str(e))
+
+class CustomIntruderMenuHandler(GenericToolMenuHandler):
+    def __init__(self, callbacks, request_modifier, invocation):
+        def send_to_intruder(request_response, modified_request):
+            callbacks.sendToIntruder(
                 request_response.getHttpService().getHost(),
                 request_response.getHttpService().getPort(),
                 request_response.getHttpService().getProtocol() == "https",
                 modified_request
             )
-            print("Sent to Intruder")
-            
-        except Exception as e:
-            print("Error at Send to Intruder: " + str(e))
+        
+        super(CustomIntruderMenuHandler, self).__init__(
+            callbacks, request_modifier, invocation, "Intruder", send_to_intruder
+        )
 
-class CustomRepeaterMenuHandler(ActionListener):
+class CustomRepeaterMenuHandler(GenericToolMenuHandler):
     def __init__(self, callbacks, request_modifier, invocation):
-        self.callbacks = callbacks
-        self.helpers = callbacks.getHelpers()
-        self.request_modifier = request_modifier
-        self.invocation = invocation
-    
-    def actionPerformed(self, event):
-        try:
-            # Get the selected request
-            selected_messages = self.invocation.getSelectedMessages()
-            if not selected_messages or len(selected_messages) == 0:
-                return
-            
-            request_response = selected_messages[0]
-            original_request = request_response.getRequest()
-            
-            # Decode the request
-            modified_request = self.request_modifier.grpcweb_decode(original_request)
-            
-            # Send the modified request to Repeater
-            self.callbacks.sendToRepeater(
+        def send_to_repeater(request_response, modified_request):
+            callbacks.sendToRepeater(
                 request_response.getHttpService().getHost(),
                 request_response.getHttpService().getPort(),
                 request_response.getHttpService().getProtocol() == "https",
                 modified_request,
                 "gRPC-Web"
             )
-            print("Sent to Repeater")
-            
-        except Exception as e:
-            print("Error at Send to Repeater: " + str(e))
+        
+        super(CustomRepeaterMenuHandler, self).__init__(
+            callbacks, request_modifier, invocation, "Repeater", send_to_repeater
+        )
 
 class BurpExtender(IBurpExtender, IHttpListener, IContextMenuFactory):
     def registerExtenderCallbacks(self, callbacks):
