@@ -1,5 +1,6 @@
 import json
 import struct
+from org.parosproxy.paros.network import HttpMessage, HttpSender
 from protobufs import ProtoBufs # or inline here
 
 def decode_grpcweb(msg):
@@ -31,7 +32,13 @@ def sendingRequest(msg, initiator, helper):
     print('sendingRequest called for url=' + msg.getRequestHeader().getURI().toString())
     header_value = msg.getRequestHeader().getHeader("x-grpcweb-flag")
     if header_value and header_value.lower() == "true":
-        encode_grpcweb(msg)
+        # make copy not to reflect in the request panel
+        new_msg = HttpMessage(msg)
+        encode_grpcweb(new_msg)
+        sender = helper.getHttpSender()
+        sender.sendAndReceive(new_msg, False)
+        msg.setResponseHeader(new_msg.getResponseHeader())
+        msg.setResponseBody(new_msg.getResponseBody())
 
 def responseReceived(msg, initiator, helper):
     pass
